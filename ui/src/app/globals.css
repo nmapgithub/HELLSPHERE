@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+:root {
+  --surface-primary: #050510;
+  --surface-secondary: #0c0b24;
+  --surface-tertiary: #15123b;
+  --neon-cyan: #00ffff;
+  --neon-magenta: #ff00ff;
+  --neon-purple: #a020f0;
+  --hud-green: #7bffc7;
+  --foreground: #e6f9ff;
+}
+
+@theme inline {
+  --color-background: var(--surface-primary);
+  --color-foreground: var(--foreground);
+  --color-cyan-500: var(--neon-cyan);
+  --color-magenta-500: var(--neon-magenta);
+  --color-purple-500: var(--neon-purple);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--surface-primary);
+  color: var(--foreground);
+  font-family: var(--font-body), "Exo 2", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: var(--font-display), "Orbitron", "Exo 2", sans-serif;
+  letter-spacing: 0.15em;
+}
+
+.font-mono {
+  font-family: var(--font-mono), "Share Tech Mono", monospace;
+}
+
+::selection {
+  background: rgba(0, 255, 255, 0.35);
+  color: #050510;
+}
+
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
+  mix-blend-mode: screen;
+  opacity: 0.35;
+  z-index: 1;
+}
