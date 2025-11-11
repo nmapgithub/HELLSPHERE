@@ -11,6 +11,8 @@ import {
   PerspectiveCamera,
   Stars,
   Html,
+  Line,
+  useTexture,
 } from "@react-three/drei";
 import {
   AdditiveBlending,
@@ -26,25 +28,19 @@ import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import { Satellite } from "./Satellite";
 import { CityLabels } from "./CityLabels";
 import { useAnalysisStore } from "@/stores/analysisStore";
+import { useGlobeStore } from "@/stores/globeStore";
+import { latLonToVector3 } from "@/lib/globeMath";
+import { GlobeDataProvider } from "./GlobeDataProvider";
 
 const EARTH_RADIUS = 1.6;
 const CAMERA_BASE_DISTANCE = 6.5;
 type AnimeHandle = ReturnType<typeof anime>;
 
-function latLonToVector3(lat: number, lon: number, radius: number) {
-  const phi = (90 - lat) * (Math.PI / 180);
-  const theta = (lon + 180) * (Math.PI / 180);
-
-  const x = -(radius * Math.sin(phi) * Math.cos(theta));
-  const z = radius * Math.sin(phi) * Math.sin(theta);
-  const y = radius * Math.cos(phi);
-
-  return new Vector3(x, y, z);
-}
-
 function Earth() {
   const meshRef = useRef<Mesh>(null);
   const phase = useAnalysisStore((state) => state.phase);
+  const useNasaTexture = useGlobeStore((state) => state.useNasaTexture);
+  const nasaTexture = useTexture("/textures/nasa-blue-marble.png");
 
   useFrame((_: RootState, delta: number) => {
     const baseSpeed = 0.12;
@@ -59,13 +55,21 @@ function Earth() {
     <group>
       <mesh ref={meshRef}>
         <sphereGeometry args={[EARTH_RADIUS, 64, 64]} />
-        <meshStandardMaterial roughness={0.65} metalness={0.1}>
-          <GradientTexture
-            stops={[0, 0.4, 1]}
-            colors={["#02021a", "#071241", "#1f296d"]}
-            size={2048}
+        {useNasaTexture ? (
+          <meshStandardMaterial
+            map={nasaTexture}
+            roughness={0.7}
+            metalness={0.05}
           />
-        </meshStandardMaterial>
+        ) : (
+          <meshStandardMaterial roughness={0.65} metalness={0.1}>
+            <GradientTexture
+              stops={[0, 0.4, 1]}
+              colors={["#02021a", "#071241", "#1f296d"]}
+              size={2048}
+            />
+          </meshStandardMaterial>
+        )}
       </mesh>
       <mesh scale={1.04}>
         <sphereGeometry args={[EARTH_RADIUS, 32, 32]} />
@@ -299,6 +303,287 @@ function CandidateMarkers({ radius }: { radius: number }) {
   );
 }
 
+function HeatmapOverlay({ radius }: { radius: number }) {
+  const overlays = useGlobeStore((state) => state.overlays);
+  const intensityLookup = useGlobeStore((state) => state.overlayIntensity);
+  const points = useGlobeStore((state) => state.heatmapPoints);
+  const timelineMultiplier = useGlobeStore(
+    (state) => state.timeline[state.timelineIndex]?.overlayMultipliers.heatmap ?? 1,
+  );
+
+  const effectiveOpacity = overlays.heatmap
+    ? (intensityLookup.heatmap ?? 1) * timelineMultiplier
+    : 0;
+  const renderedPoints = useMemo(() => {
+    if (!points.length || effectiveOpacity <= 0.01) return [];
+    return points.map((point) => {
+      const position = latLonToVector3(
+        point.latitude,
+        point.longitude,
+        radius * 1.015,
+      );
+      const intensity = Math.max(0.1, Math.min(point.intensity, 1.5));
+      const baseColor = new Color().setHSL(
+        (0.6 - intensity * 0.5 + 1) % 1,
+        0.9,
+        0.55,
+      );
+      return {
+        id: point.id,
+        position,
+        intensity,
+        color: baseColor,
+        name: point.name,
+      };
+    });
+  }, [points, radius, effectiveOpacity]);
+
+  if (!renderedPoints.length || effectiveOpacity <= 0.01) return null;
+
+  return (
+    <group>
+      {renderedPoints.map((point) => (
+        <mesh
+          key={`heat-${point.id}`}
+          position={point.position}
+          scale={0.06 * point.intensity * effectiveOpacity}
+        >
+          <sphereGeometry args={[1, 16, 16]} />
+          <meshBasicMaterial
+            color={point.color}
+            transparent
+            opacity={0.6 * effectiveOpacity}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function WeatherOverlay({ radius }: { radius: number }) {
+  const overlays = useGlobeStore((state) => state.overlays);
+  const intensityLookup = useGlobeStore((state) => state.overlayIntensity);
+  const cells = useGlobeStore((state) => state.weatherCells);
+  const timelineMultiplier = useGlobeStore(
+    (state) => state.timeline[state.timelineIndex]?.overlayMultipliers.weather ?? 1,
+  );
+
+  const effectiveOpacity = overlays.weather
+    ? (intensityLookup.weather ?? 1) * timelineMultiplier
+    : 0;
+  const renderedCells = useMemo(() => {
+    if (!cells.length || effectiveOpacity <= 0.01) return [];
+    const colorMap: Record<string, string> = {
+      storm: "#ff006e",
+      rain: "#00e0ff",
+      cloudy: "#9aa7ff",
+      clear: "#00ff99",
+      wind: "#ffd166",
+    };
+    return cells.map((cell) => {
+      const position = latLonToVector3(
+        cell.latitude,
+        cell.longitude,
+        radius * 1.025,
+      );
+      const severity = Math.max(0.2, Math.min(cell.severity + 0.2, 1.8));
+      return {
+        id: cell.id,
+        position,
+        severity,
+        color: colorMap[cell.status] ?? "#ffffff",
+        status: cell.status,
+      };
+    });
+  }, [cells, radius, effectiveOpacity]);
+
+  if (!renderedCells.length || effectiveOpacity <= 0.01) return null;
+
+  return (
+    <group>
+      {renderedCells.map((cell) => (
+        <mesh
+          key={`weather-${cell.id}`}
+          position={cell.position}
+          rotation={[-Math.PI / 2, 0, 0]}
+          scale={[0.25 * cell.severity, 0.25 * cell.severity, 0.25]}
+        >
+          <circleGeometry args={[1, 32]} />
+          <meshBasicMaterial
+            color={cell.color}
+            transparent
+            opacity={0.22 * effectiveOpacity}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function RouteOverlay({ radius }: { radius: number }) {
+  const overlays = useGlobeStore((state) => state.overlays);
+  const intensityLookup = useGlobeStore((state) => state.overlayIntensity);
+  const routes = useGlobeStore((state) => state.routeArcs);
+  const timelineMultiplier = useGlobeStore(
+    (state) => state.timeline[state.timelineIndex]?.overlayMultipliers.routes ?? 1,
+  );
+
+  const effectiveOpacity = overlays.routes
+    ? (intensityLookup.routes ?? 1) * timelineMultiplier
+    : 0;
+  const arcs = useMemo(() => {
+    if (!routes.length || effectiveOpacity <= 0.01) return [];
+    return routes.map((route) => {
+      const start = latLonToVector3(
+        route.from.latitude,
+        route.from.longitude,
+        radius * 1.02,
+      );
+      const end = latLonToVector3(
+        route.to.latitude,
+        route.to.longitude,
+        radius * 1.02,
+      );
+      const mid = start
+        .clone()
+        .add(end)
+        .normalize()
+        .multiplyScalar(radius * (1.16 + route.magnitude * 0.4));
+      const color = new Color().setHSL(
+        0.55 - Math.min(route.magnitude, 1) * 0.35,
+        0.75,
+        0.55,
+      );
+      return {
+        id: route.id,
+        points: [start, mid, end],
+        color,
+        magnitude: route.magnitude,
+        label: `${route.from.name} → ${route.to.name}`,
+      };
+    });
+  }, [routes, radius, effectiveOpacity]);
+
+  if (!arcs.length || effectiveOpacity <= 0.01) return null;
+
+  return (
+    <group>
+      {arcs.map((arc) => (
+        <group key={`route-${arc.id}`}>
+          <Line
+            points={arc.points.map((vector) => vector.toArray() as [number, number, number])}
+            color={arc.color}
+            lineWidth={2}
+            transparent
+            opacity={0.35 * effectiveOpacity}
+          />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+function RecentQueriesOverlay({ radius }: { radius: number }) {
+  const queries = useGlobeStore((state) => state.recentQueries);
+  const intensity = Math.max(0.15, Math.min(0.6, queries.length / 10));
+
+  if (!queries.length) return null;
+
+  return (
+    <group>
+      {queries.map((query, index) => {
+        const position = latLonToVector3(query.latitude, query.longitude, radius * 1.01);
+        return (
+          <mesh key={`recent-query-${query.id}-${index}`} position={position}>
+            <sphereGeometry args={[0.025, 12, 12]} />
+            <meshBasicMaterial color="#44ffd2" transparent opacity={intensity} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function SearchTrails({ radius }: { radius: number }) {
+  const trails = useGlobeStore((state) => state.queryTrails);
+  if (!trails.length) return null;
+
+  return (
+    <group>
+      {trails.map((trail, index) => {
+        const start = latLonToVector3(trail.from.latitude, trail.from.longitude, radius * 1.02);
+        const end = latLonToVector3(trail.to.latitude, trail.to.longitude, radius * 1.02);
+        const mid = start
+          .clone()
+          .add(end)
+          .normalize()
+          .multiplyScalar(radius * 1.1);
+        const color = new Color().setHSL((0.55 - index * 0.05 + 1) % 1, 0.8, 0.55);
+        return (
+          <Line
+            key={`trail-${trail.occurredAt}-${index}`}
+            points={[start, mid, end].map((vector) => vector.toArray() as [number, number, number])}
+            color={color}
+            transparent
+            opacity={0.35}
+            lineWidth={1.5}
+          />
+        );
+      })}
+    </group>
+  );
+}
+
+function GeoFenceOverlay({ radius }: { radius: number }) {
+  const geofence = useGlobeStore((state) => state.activeGeofence);
+  if (!geofence) return null;
+
+  const [south, north, west, east] = geofence;
+  const segments = 48;
+
+  const latLine = (lat: number, startLon: number, endLon: number) => {
+    const points: Vector3[] = [];
+    for (let i = 0; i <= segments; i += 1) {
+      const t = i / segments;
+      const lon = startLon + (endLon - startLon) * t;
+      points.push(latLonToVector3(lat, lon, radius * 1.008));
+    }
+    return points;
+  };
+
+  const lonLine = (lon: number, startLat: number, endLat: number) => {
+    const points: Vector3[] = [];
+    for (let i = 0; i <= segments; i += 1) {
+      const t = i / segments;
+      const lat = startLat + (endLat - startLat) * t;
+      points.push(latLonToVector3(lat, lon, radius * 1.008));
+    }
+    return points;
+  };
+
+  const edges = [
+    latLine(north, west, east),
+    latLine(south, west, east),
+    lonLine(west, south, north),
+    lonLine(east, south, north),
+  ];
+
+  return (
+    <group>
+      {edges.map((edge, index) => (
+        <Line
+          key={`geofence-edge-${index}`}
+          points={edge.map((vector) => vector.toArray() as [number, number, number])}
+          color="#ff66ff"
+          opacity={0.45}
+          transparent
+          lineWidth={1.5}
+        />
+      ))}
+    </group>
+  );
+}
+
 function SerpBadges({ radius }: { radius: number }) {
   const serpContext = useAnalysisStore((state) => state.analysis?.analysis?.serpapi_results?.context);
   const target = useAnalysisStore((state) => state.target);
@@ -382,6 +667,7 @@ function SceneContent() {
 
   return (
     <>
+      <GlobeDataProvider />
       <PerspectiveCamera makeDefault fov={52} position={[0, 2, CAMERA_BASE_DISTANCE]} />
       <color attach="background" args={["#050510"]} />
       <ambientLight intensity={0.28} />
@@ -397,6 +683,12 @@ function SceneContent() {
         <TargetLabels radius={EARTH_RADIUS} />
         <SerpBadges radius={EARTH_RADIUS} />
         <CandidateMarkers radius={EARTH_RADIUS} />
+        <HeatmapOverlay radius={EARTH_RADIUS} />
+        <WeatherOverlay radius={EARTH_RADIUS} />
+        <RouteOverlay radius={EARTH_RADIUS} />
+        <RecentQueriesOverlay radius={EARTH_RADIUS} />
+        <SearchTrails radius={EARTH_RADIUS} />
+        <GeoFenceOverlay radius={EARTH_RADIUS} />
         {satellites.map((satellite) => (
           <Satellite key={satellite.color} {...satellite} altitude={0.6} />
         ))}

@@ -8,6 +8,7 @@ import { UploadButton } from "@/components/UploadButton";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { AnalysisResultsPanel } from "@/components/AnalysisResultsPanel";
 import { useAnalysisStore } from "@/stores/analysisStore";
+import { GlobeControlPanel } from "@/components/GlobeControlPanel";
 
 const backgroundLayers = [
   "radial-gradient(circle at 20% 20%, rgba(0,255,255,0.08), transparent 55%)",
@@ -80,6 +81,7 @@ export default function Home() {
         </header>
 
         <div className="relative flex-1">
+          <GlobeControlPanel />
           <HUDOverlay />
           <AnalysisResultsPanel />
         </div>
